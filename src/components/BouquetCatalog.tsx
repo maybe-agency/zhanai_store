@@ -10,9 +10,39 @@ type BouquetCatalogProps = {
 };
 
 const ALL_CATEGORIES = "Все";
+const ALL_PRICES = "all";
+
+const priceFilters = [
+  {
+    id: ALL_PRICES,
+    label: "Все",
+    matches: () => true,
+  },
+  {
+    id: "under-3000",
+    label: "До 3 000",
+    matches: (price: number) => price < 3000,
+  },
+  {
+    id: "3000-5000",
+    label: "3 000–5 000",
+    matches: (price: number) => price >= 3000 && price <= 5000,
+  },
+  {
+    id: "5000-8000",
+    label: "5 000–8 000",
+    matches: (price: number) => price >= 5000 && price <= 8000,
+  },
+  {
+    id: "over-8000",
+    label: "8 000+",
+    matches: (price: number) => price > 8000,
+  },
+];
 
 export function BouquetCatalog({ bouquets }: BouquetCatalogProps) {
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
+  const [selectedPriceFilter, setSelectedPriceFilter] = useState(ALL_PRICES);
   const [selectedBouquet, setSelectedBouquet] = useState<Bouquet | null>(null);
 
   const categories = useMemo(() => {
@@ -23,10 +53,18 @@ export function BouquetCatalog({ bouquets }: BouquetCatalogProps) {
     return [ALL_CATEGORIES, ...Array.from(new Set(uniqueCategories))];
   }, [bouquets]);
 
-  const filteredBouquets =
-    selectedCategory === ALL_CATEGORIES
-      ? bouquets
-      : bouquets.filter((bouquet) => bouquet.category === selectedCategory);
+  const selectedPriceMatcher =
+    priceFilters.find((filter) => filter.id === selectedPriceFilter)
+      ?.matches ?? priceFilters[0].matches;
+
+  const filteredBouquets = bouquets.filter((bouquet) => {
+    const matchesCategory =
+      selectedCategory === ALL_CATEGORIES ||
+      bouquet.category === selectedCategory;
+    const matchesPrice = selectedPriceMatcher(bouquet.price);
+
+    return matchesCategory && matchesPrice;
+  });
 
   return (
     <>
@@ -55,7 +93,7 @@ export function BouquetCatalog({ bouquets }: BouquetCatalogProps) {
 
       <section className="px-4 pb-10 pt-5 sm:px-6 sm:pt-8 lg:px-10">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-5 flex items-end justify-between gap-4 sm:mb-7">
+          <div className="mb-5 sm:mb-7">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#c98696]">
                 Каталог
@@ -65,8 +103,25 @@ export function BouquetCatalog({ bouquets }: BouquetCatalogProps) {
               </h2>
             </div>
 
-            <div className="hidden rounded-full border border-dashed border-[#eddad3] bg-[#fff8f6] px-4 py-2 text-sm font-medium text-stone-500 sm:block">
-              Фильтры позже
+            <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+              {priceFilters.map((filter) => {
+                const isActive = filter.id === selectedPriceFilter;
+
+                return (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={() => setSelectedPriceFilter(filter.id)}
+                    className={`shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition-all duration-200 sm:text-sm ${
+                      isActive
+                        ? "bg-[#262626] text-white shadow-[0_10px_26px_rgba(24,24,27,0.16)]"
+                        : "bg-transparent text-zinc-800 hover:bg-zinc-100"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
