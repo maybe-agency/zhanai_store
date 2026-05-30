@@ -17,7 +17,6 @@ type CheckoutStep = "order" | "payment" | "receipt" | "success";
 type OrderFormData = {
   customerName: string;
   customerPhone: string;
-  customerAddress: string;
   recipientName: string;
   recipientPhone: string;
   deliveryAddress: string;
@@ -47,7 +46,6 @@ const defaultPhoneCode = "+996";
 const initialOrderData: OrderFormData = {
   customerName: "",
   customerPhone: "",
-  customerAddress: "",
   recipientName: "",
   recipientPhone: "",
   deliveryAddress: "",
@@ -160,7 +158,6 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
     setOrderData({
       customerName: String(formData.get("customerName") ?? ""),
       customerPhone: normalizedCustomerPhone,
-      customerAddress: String(formData.get("customerAddress") ?? ""),
       recipientName: String(formData.get("recipientName") ?? ""),
       recipientPhone: normalizedRecipientPhone,
       deliveryAddress,
@@ -204,7 +201,6 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
     orderFormData.append("bouquetPrice", String(bouquet.price));
     orderFormData.append("customerName", orderData.customerName);
     orderFormData.append("customerPhone", orderData.customerPhone);
-    orderFormData.append("customerAddress", orderData.customerAddress);
     orderFormData.append("recipientName", orderData.recipientName);
     orderFormData.append("recipientPhone", orderData.recipientPhone);
     orderFormData.append("deliveryAddress", orderData.deliveryAddress);
@@ -484,10 +480,6 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 </div>
               ) : null}
 
-              <label className="block text-sm font-medium text-stone-700">
-                Адрес заказчика
-                <input className={inputClassName} name="customerAddress" />
-              </label>
             </div>
 
             <div className="space-y-4">

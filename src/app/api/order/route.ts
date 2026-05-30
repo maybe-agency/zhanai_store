@@ -21,6 +21,14 @@ function getStringValue(formData: FormData, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function getMessageLine(label: string, value: string): string | null {
+  return value ? `${label}: ${value}` : null;
+}
+
+function getMessageSection(title: string, lines: Array<string | null>): string {
+  return [title, ...lines.filter(Boolean)].join("\n");
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -86,48 +94,33 @@ export async function POST(request: Request) {
     const orderTotal = Math.max(bouquetPriceNumber - discountApplied, 0);
     const orderNumber = await getNextOrderNumber();
 
-    const message = `🌷 Новый заказ
-
-Номер заказа: ${orderNumber}
-
-Букет:
-${bouquetName}
-
-Стоимость:
-${formatKgs(orderTotal)}
-
-👤 Заказчик
-
-Имя:
-${customerName}
-
-Телефон:
-${customerPhone}
-
-🎁 Получатель
-
-Имя:
-${recipientName}
-
-Телефон:
-${recipientPhone}
-
-📍 Адрес доставки
-
-${deliveryAddress}
-
-🕒 Доставка
-
-${deliveryDate}
-${deliveryTime}
-
-💌 Открытка
-
-${cardText}
-
-📝 Комментарий
-
-${comment}`;
+    const deliveryDateTime = [deliveryDate, deliveryTime]
+      .filter(Boolean)
+      .join(", ");
+    const message = [
+      "🌷 Новый заказ",
+      [
+        `Номер заказа: ${orderNumber}`,
+        `Букет: ${bouquetName}`,
+        `Стоимость: ${formatKgs(orderTotal)}`,
+      ].join("\n"),
+      getMessageSection("👤 Заказчик", [
+        getMessageLine("Имя", customerName),
+        getMessageLine("Телефон", customerPhone),
+      ]),
+      getMessageSection("🎁 Получатель", [
+        getMessageLine("Имя", recipientName),
+        getMessageLine("Телефон", recipientPhone),
+      ]),
+      getMessageSection("📍 Доставка", [deliveryAddress]),
+      deliveryDateTime
+        ? getMessageSection("🕒 Время доставки", [deliveryDateTime])
+        : null,
+      cardText ? getMessageSection("💌 Открытка", [cardText]) : null,
+      comment ? getMessageSection("📝 Комментарий", [comment]) : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     await sendTelegramMessage(message);
 
