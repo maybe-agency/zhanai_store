@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  appendOrder,
+  getCustomerByPhone,
+  getNextOrderNumber,
+  upsertCustomerOrder,
+} from "@/lib/googleSheets";
+import { formatKgs } from "@/lib/currency";
+import { normalizePhone } from "@/lib/phone";
 import { sendTelegramMessage, sendTelegramPhoto } from "@/lib/telegram";
 
 const allowedReceiptTypes = new Set([
@@ -17,25 +25,39 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
 
+    const bouquetId = getStringValue(formData, "bouquetId");
     const bouquetName = getStringValue(formData, "bouquetName");
     const bouquetPrice = getStringValue(formData, "bouquetPrice");
-    const name = getStringValue(formData, "name");
-    const phone = getStringValue(formData, "phone");
-    const address = getStringValue(formData, "address");
+    const customerName = getStringValue(formData, "customerName");
+    const customerPhone = normalizePhone(
+      getStringValue(formData, "customerPhone"),
+    );
+    const recipientName = getStringValue(formData, "recipientName");
+    const recipientPhone = normalizePhone(
+      getStringValue(formData, "recipientPhone"),
+    );
+    const deliveryAddress = getStringValue(formData, "deliveryAddress");
     const deliveryDate = getStringValue(formData, "deliveryDate");
     const deliveryTime = getStringValue(formData, "deliveryTime");
     const cardText = getStringValue(formData, "cardText");
     const comment = getStringValue(formData, "comment");
+    const discountRequested =
+      getStringValue(formData, "discountApplied") === "true";
+    const consentAccepted =
+      getStringValue(formData, "consentAccepted") === "true";
     const receipt = formData.get("receipt");
+    const bouquetPriceNumber = Number(bouquetPrice);
+    const orderDate = new Date().toISOString();
 
     if (
+      !bouquetId ||
       !bouquetName ||
-      !bouquetPrice ||
-      !name ||
-      !phone ||
-      !address ||
-      !deliveryDate ||
-      !deliveryTime
+      !Number.isFinite(bouquetPriceNumber) ||
+      customerPhone.length <= 4 ||
+      !deliveryAddress ||
+      !consentAccepted ||
+      !(receipt instanceof File) ||
+      receipt.size === 0
     ) {
       return NextResponse.json(
         { error: "Missing required order fields" },
@@ -52,22 +74,59 @@ export async function POST(request: Request) {
       }
     }
 
+    const customer = await getCustomerByPhone(customerPhone);
+    const availableDiscount =
+      customer && customer.ordersCount > 0 && customer.ordersCount % 4 === 0
+        ? 500
+        : 0;
+    const discountApplied =
+      discountRequested && availableDiscount > 0
+        ? Math.min(availableDiscount, bouquetPriceNumber)
+        : 0;
+    const orderTotal = Math.max(bouquetPriceNumber - discountApplied, 0);
+    const orderNumber = await getNextOrderNumber();
+
     const message = `🌷 Новый заказ
 
-Букет: ${bouquetName}
-Цена: ${bouquetPrice} сомов
+Номер заказа: ${orderNumber}
 
-Имя: ${name}
-Телефон: ${phone}
-Адрес: ${address}
+Букет:
+${bouquetName}
 
-Дата доставки: ${deliveryDate}
-Время доставки: ${deliveryTime}
+Стоимость:
+${formatKgs(orderTotal)}
 
-Открытка:
+👤 Заказчик
+
+Имя:
+${customerName}
+
+Телефон:
+${customerPhone}
+
+🎁 Получатель
+
+Имя:
+${recipientName}
+
+Телефон:
+${recipientPhone}
+
+📍 Адрес доставки
+
+${deliveryAddress}
+
+🕒 Доставка
+
+${deliveryDate}
+${deliveryTime}
+
+💌 Открытка
+
 ${cardText}
 
-Комментарий:
+📝 Комментарий
+
 ${comment}`;
 
     await sendTelegramMessage(message);
@@ -75,6 +134,32 @@ ${comment}`;
     if (receipt instanceof File && receipt.size > 0) {
       await sendTelegramPhoto(receipt, receipt.name);
     }
+
+    await appendOrder({
+      id: orderNumber,
+      date: orderDate,
+      bouquetId,
+      bouquetName,
+      price: bouquetPriceNumber,
+      customerName,
+      customerPhone,
+      recipientName,
+      recipientPhone,
+      address: deliveryAddress,
+      deliveryDate,
+      deliveryTime,
+      cardText,
+      comment,
+      receiptUrl: "",
+      status: "new",
+    });
+
+    await upsertCustomerOrder({
+      phone: customerPhone,
+      name: customerName,
+      orderAmount: bouquetPriceNumber,
+      orderDate,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

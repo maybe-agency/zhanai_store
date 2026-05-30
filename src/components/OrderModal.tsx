@@ -2,8 +2,10 @@
 
 import Image from "next/image";
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { formatKgs } from "@/lib/currency";
 import type { Bouquet } from "@/lib/googleSheets";
+import { formatPhoneInput, normalizePhone } from "@/lib/phone";
 
 type OrderModalProps = {
   bouquet: Bouquet;
@@ -13,55 +15,181 @@ type OrderModalProps = {
 type CheckoutStep = "order" | "payment" | "receipt" | "success";
 
 type OrderFormData = {
-  name: string;
-  phone: string;
-  address: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  recipientName: string;
+  recipientPhone: string;
+  deliveryAddress: string;
   deliveryDate: string;
   deliveryTime: string;
   cardText: string;
   comment: string;
+  discountApplied: boolean;
+  consentAccepted: boolean;
+};
+
+type CustomerLookup = {
+  phone: string;
+  name: string;
+  ordersCount: number;
+  totalSpent: number;
+  lastOrderDate: string;
+  discountAvailable: number;
 };
 
 const inputClassName =
   "mt-1.5 w-full rounded-xl border border-[#f0ddd6] bg-white px-3 py-2.5 text-sm text-stone-950 outline-none transition focus:border-[#dfbfc5] focus:ring-2 focus:ring-[#fff3f5]";
 
 const qrImage = process.env.NEXT_PUBLIC_QR_IMAGE;
+const defaultPhoneCode = "+996";
 
 const initialOrderData: OrderFormData = {
-  name: "",
-  phone: "",
-  address: "",
+  customerName: "",
+  customerPhone: "",
+  customerAddress: "",
+  recipientName: "",
+  recipientPhone: "",
+  deliveryAddress: "",
   deliveryDate: "",
   deliveryTime: "",
   cardText: "",
   comment: "",
+  discountApplied: false,
+  consentAccepted: false,
 };
 
 export function OrderModal({ bouquet, onClose }: OrderModalProps) {
   const [step, setStep] = useState<CheckoutStep>("order");
   const [orderData, setOrderData] = useState<OrderFormData>(initialOrderData);
+  const [customerPhone, setCustomerPhone] = useState(defaultPhoneCode);
+  const [recipientPhone, setRecipientPhone] = useState(defaultPhoneCode);
+  const [customerLookup, setCustomerLookup] = useState<CustomerLookup | null>(
+    null,
+  );
+  const [hasCustomerLookupResult, setHasCustomerLookupResult] = useState(false);
+  const [isCustomerLookupLoading, setIsCustomerLookupLoading] = useState(false);
+  const [discountApplied, setDiscountApplied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const activeDiscount = customerLookup?.discountAvailable ?? 0;
+  const orderDiscount = discountApplied
+    ? Math.min(activeDiscount, bouquet.price)
+    : 0;
+  const orderTotal = Math.max(bouquet.price - orderDiscount, 0);
+
+  const lookupCustomerDiscount = useCallback(async (phone: string) => {
+    const normalizedPhone = normalizePhone(phone);
+
+    if (normalizedPhone.length <= defaultPhoneCode.length) {
+      setCustomerLookup(null);
+      setHasCustomerLookupResult(false);
+      return;
+    }
+
+    setIsCustomerLookupLoading(true);
+
+    try {
+      const response = await fetch("/api/customer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone: normalizedPhone }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Customer lookup failed");
+      }
+
+      const data = (await response.json()) as {
+        customer: CustomerLookup | null;
+      };
+
+      setCustomerLookup(data.customer);
+      setHasCustomerLookupResult(true);
+    } catch {
+      setCustomerLookup(null);
+      setHasCustomerLookupResult(false);
+    } finally {
+      setIsCustomerLookupLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const normalizedPhone = normalizePhone(customerPhone);
+
+    if (normalizedPhone.length <= defaultPhoneCode.length) {
+      return;
+    }
+
+    const lookupTimeout = window.setTimeout(() => {
+      void lookupCustomerDiscount(normalizedPhone);
+    }, 500);
+
+    return () => window.clearTimeout(lookupTimeout);
+  }, [customerPhone, lookupCustomerDiscount]);
 
   function handleOrderSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    const normalizedCustomerPhone = normalizePhone(
+      String(formData.get("customerPhone") ?? ""),
+    );
+    const normalizedRecipientPhone = normalizePhone(
+      String(formData.get("recipientPhone") ?? ""),
+    );
+    const deliveryAddress = String(formData.get("deliveryAddress") ?? "");
+    const consentAccepted = formData.get("consentAccepted") === "on";
+
+    if (normalizedCustomerPhone.length <= defaultPhoneCode.length) {
+      setSubmitError("Укажите телефон заказчика.");
+      return;
+    }
+
+    if (!deliveryAddress.trim()) {
+      setSubmitError("Укажите адрес доставки.");
+      return;
+    }
+
+    if (!consentAccepted) {
+      setSubmitError("Необходимо согласие на обработку персональных данных.");
+      return;
+    }
 
     setOrderData({
-      name: String(formData.get("name") ?? ""),
-      phone: String(formData.get("phone") ?? ""),
-      address: String(formData.get("address") ?? ""),
+      customerName: String(formData.get("customerName") ?? ""),
+      customerPhone: normalizedCustomerPhone,
+      customerAddress: String(formData.get("customerAddress") ?? ""),
+      recipientName: String(formData.get("recipientName") ?? ""),
+      recipientPhone: normalizedRecipientPhone,
+      deliveryAddress,
       deliveryDate: String(formData.get("deliveryDate") ?? ""),
       deliveryTime: String(formData.get("deliveryTime") ?? ""),
       cardText: String(formData.get("cardText") ?? ""),
       comment: String(formData.get("comment") ?? ""),
+      discountApplied,
+      consentAccepted,
     });
     setSubmitError("");
     setStep("payment");
   }
 
+  function placeCursorAtPhoneEnd(input: HTMLInputElement) {
+    if (input.value === defaultPhoneCode) {
+      window.requestAnimationFrame(() => {
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    }
+  }
+
   async function handleReceiptSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isSubmitting) {
+      return;
+    }
+
     const form = event.currentTarget;
 
     setIsSubmitting(true);
@@ -71,19 +199,29 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
     const orderFormData = new FormData();
     const receipt = receiptFormData.get("receipt");
 
+    orderFormData.append("bouquetId", bouquet.id);
     orderFormData.append("bouquetName", bouquet.name);
     orderFormData.append("bouquetPrice", String(bouquet.price));
-    orderFormData.append("name", orderData.name);
-    orderFormData.append("phone", orderData.phone);
-    orderFormData.append("address", orderData.address);
+    orderFormData.append("customerName", orderData.customerName);
+    orderFormData.append("customerPhone", orderData.customerPhone);
+    orderFormData.append("customerAddress", orderData.customerAddress);
+    orderFormData.append("recipientName", orderData.recipientName);
+    orderFormData.append("recipientPhone", orderData.recipientPhone);
+    orderFormData.append("deliveryAddress", orderData.deliveryAddress);
     orderFormData.append("deliveryDate", orderData.deliveryDate);
     orderFormData.append("deliveryTime", orderData.deliveryTime);
     orderFormData.append("cardText", orderData.cardText);
     orderFormData.append("comment", orderData.comment);
+    orderFormData.append("discountApplied", String(orderData.discountApplied));
+    orderFormData.append("consentAccepted", String(orderData.consentAccepted));
 
-    if (receipt instanceof File && receipt.size > 0) {
-      orderFormData.append("receipt", receipt);
+    if (!(receipt instanceof File) || receipt.size === 0) {
+      setSubmitError("Загрузите чек оплаты.");
+      setIsSubmitting(false);
+      return;
     }
+
+    orderFormData.append("receipt", receipt);
 
     try {
       const response = await fetch("/api/order", {
@@ -97,6 +235,11 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
 
       form.reset();
       setOrderData(initialOrderData);
+      setCustomerPhone(defaultPhoneCode);
+      setRecipientPhone(defaultPhoneCode);
+      setCustomerLookup(null);
+      setHasCustomerLookupResult(false);
+      setDiscountApplied(false);
       setStep("success");
     } catch {
       setSubmitError("Не удалось отправить заказ. Попробуйте еще раз.");
@@ -124,7 +267,7 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
             {bouquet.name}
           </p>
           <p className="mt-1 text-base font-semibold text-zinc-700">
-            {bouquet.price.toLocaleString("ru-RU")} сом
+            {formatKgs(bouquet.price)}
           </p>
         </div>
 
@@ -156,8 +299,18 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 {bouquet.name}
               </p>
               <p className="mt-1 text-sm font-semibold text-zinc-700">
-                {bouquet.price.toLocaleString("ru-RU")} сом
+                {formatKgs(bouquet.price)}
               </p>
+              {orderDiscount > 0 ? (
+                <>
+                  <p className="mt-1 text-sm font-semibold text-[#b77b88]">
+                    Скидка: {formatKgs(orderDiscount)}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-zinc-900">
+                    Итого: {formatKgs(orderTotal)}
+                  </p>
+                </>
+              ) : null}
             </div>
 
             <div className="mx-auto grid aspect-square w-48 place-items-center rounded-2xl bg-white shadow-[inset_0_0_0_1px_#f0ddd6]">
@@ -216,6 +369,7 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 name="receipt"
                 type="file"
                 accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                required
               />
             </label>
 
@@ -228,63 +382,171 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 type="button"
                 onClick={onClose}
                 disabled={isSubmitting}
-                className="rounded-full border border-[#f0ddd6] bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-[#dfbfc5]"
+                className="rounded-full border border-[#f0ddd6] bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-[#dfbfc5] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Отмена
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                className="rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {isSubmitting ? "Отправляем..." : "Отправить заказ"}
               </button>
             </div>
           </form>
         ) : (
-          <form onSubmit={handleOrderSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-medium text-stone-700">
-                Имя *
-                <input className={inputClassName} name="name" required />
-              </label>
+          <form onSubmit={handleOrderSubmit} className="space-y-5">
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-stone-950">
+                Заказчик
+              </p>
 
-              <label className="text-sm font-medium text-stone-700">
-                Телефон *
-                <input
-                  className={inputClassName}
-                  name="phone"
-                  type="tel"
-                  required
-                />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-stone-700">
+                  Имя заказчика *
+                  <input className={inputClassName} name="customerName" />
+                </label>
+
+                <label className="text-sm font-medium text-stone-700">
+                  Телефон заказчика *
+                  <input
+                    className={inputClassName}
+                    name="customerPhone"
+                    type="tel"
+                    inputMode="tel"
+                    value={customerPhone}
+                    onFocus={(event) =>
+                      placeCursorAtPhoneEnd(event.currentTarget)
+                    }
+                    onChange={(event) => {
+                      setCustomerPhone(formatPhoneInput(event.target.value));
+                      setCustomerLookup(null);
+                      setHasCustomerLookupResult(false);
+                      setDiscountApplied(false);
+                    }}
+                    required
+                  />
+                </label>
+              </div>
+
+              {isCustomerLookupLoading ? (
+                <p className="text-sm text-stone-500">Проверяем скидку...</p>
+              ) : null}
+
+              {activeDiscount > 0 ? (
+                <div className="rounded-2xl bg-[#fff8f6] p-4">
+                  <div className="mb-3 space-y-1 text-sm text-stone-600">
+                    <p>
+                      Заказов:{" "}
+                      <span className="font-semibold text-stone-950">
+                        {customerLookup?.ordersCount ?? 0}
+                      </span>
+                    </p>
+                    <p>
+                      Всего потрачено:{" "}
+                      <span className="font-semibold text-stone-950">
+                        {formatKgs(customerLookup?.totalSpent ?? 0)}
+                      </span>
+                    </p>
+                  </div>
+                  <p className="text-sm font-semibold text-stone-950">
+                    Вам доступна скидка {formatKgs(activeDiscount)}
+                  </p>
+                  <label className="mt-3 flex items-center gap-2 text-sm font-medium text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={discountApplied}
+                      onChange={(event) =>
+                        setDiscountApplied(event.target.checked)
+                      }
+                      className="h-4 w-4 accent-zinc-900"
+                    />
+                    Применить скидку к этому заказу
+                  </label>
+                </div>
+              ) : null}
+
+              {hasCustomerLookupResult && activeDiscount === 0 ? (
+                <div className="rounded-2xl bg-[#fff8f6] p-4 text-sm text-stone-600">
+                  <p>
+                    Заказов:{" "}
+                    <span className="font-semibold text-stone-950">
+                      {customerLookup?.ordersCount ?? 0}
+                    </span>
+                  </p>
+                  <p className="mt-1">
+                    Всего потрачено:{" "}
+                    <span className="font-semibold text-stone-950">
+                      {formatKgs(customerLookup?.totalSpent ?? 0)}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
+
+              <label className="block text-sm font-medium text-stone-700">
+                Адрес заказчика
+                <input className={inputClassName} name="customerAddress" />
               </label>
             </div>
 
-            <label className="block text-sm font-medium text-stone-700">
-              Адрес доставки *
-              <input className={inputClassName} name="address" required />
-            </label>
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-stone-950">
+                Получатель
+              </p>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-medium text-stone-700">
-                Дата доставки *
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-stone-700">
+                  Имя получателя *
+                  <input className={inputClassName} name="recipientName" />
+                </label>
+
+                <label className="text-sm font-medium text-stone-700">
+                  Телефон получателя
+                  <input
+                    className={inputClassName}
+                    name="recipientPhone"
+                    type="tel"
+                    inputMode="tel"
+                    value={recipientPhone}
+                    onFocus={(event) =>
+                      placeCursorAtPhoneEnd(event.currentTarget)
+                    }
+                    onChange={(event) =>
+                      setRecipientPhone(formatPhoneInput(event.target.value))
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="block text-sm font-medium text-stone-700">
+                Адрес доставки *
                 <input
                   className={inputClassName}
-                  name="deliveryDate"
-                  type="date"
+                  name="deliveryAddress"
                   required
                 />
               </label>
 
-              <label className="text-sm font-medium text-stone-700">
-                Время доставки *
-                <input
-                  className={inputClassName}
-                  name="deliveryTime"
-                  type="time"
-                  required
-                />
-              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-stone-700">
+                  Дата доставки *
+                  <input
+                    className={inputClassName}
+                    name="deliveryDate"
+                    type="date"
+                  />
+                </label>
+
+                <label className="text-sm font-medium text-stone-700">
+                  Время доставки *
+                  <input
+                    className={inputClassName}
+                    name="deliveryTime"
+                    type="time"
+                  />
+                </label>
+              </div>
             </div>
 
             <label className="block text-sm font-medium text-stone-700">
@@ -302,6 +564,20 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 name="comment"
               />
             </label>
+
+            <label className="flex items-start gap-2 text-sm font-medium text-stone-700">
+              <input
+                name="consentAccepted"
+                type="checkbox"
+                required
+                className="mt-1 h-4 w-4 accent-zinc-900"
+              />
+              <span>Я согласен на обработку персональных данных</span>
+            </label>
+
+            {submitError ? (
+              <p className="text-sm font-medium text-red-600">{submitError}</p>
+            ) : null}
 
             <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
               <button

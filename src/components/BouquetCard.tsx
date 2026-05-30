@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { Bouquet } from "@/lib/googleSheets";
+import { formatKgs } from "@/lib/currency";
 
 type BouquetCardProps = {
   bouquet: Bouquet;
@@ -49,7 +50,7 @@ export function BouquetCard({ bouquet, onOrder }: BouquetCardProps) {
             {bouquet.name}
           </h2>
           <p className="mt-1 text-sm font-semibold text-zinc-700 sm:text-lg">
-            {bouquet.price.toLocaleString("ru-RU")} сом
+            {formatKgs(bouquet.price)}
           </p>
         </div>
 
