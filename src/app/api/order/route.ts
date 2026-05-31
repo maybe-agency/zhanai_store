@@ -45,6 +45,9 @@ export async function POST(request: Request) {
       getStringValue(formData, "recipientPhone"),
     );
     const deliveryAddress = getStringValue(formData, "deliveryAddress");
+    const latitude = getStringValue(formData, "latitude");
+    const longitude = getStringValue(formData, "longitude");
+    const mapUrl = getStringValue(formData, "mapUrl");
     const deliveryDate = getStringValue(formData, "deliveryDate");
     const deliveryTime = getStringValue(formData, "deliveryTime");
     const cardText = getStringValue(formData, "cardText");
@@ -62,6 +65,9 @@ export async function POST(request: Request) {
       !bouquetName ||
       !Number.isFinite(bouquetPriceNumber) ||
       customerPhone.length <= 4 ||
+      !latitude ||
+      !longitude ||
+      !mapUrl ||
       !deliveryAddress ||
       !consentAccepted ||
       !(receipt instanceof File) ||
@@ -112,7 +118,8 @@ export async function POST(request: Request) {
         getMessageLine("Имя", recipientName),
         getMessageLine("Телефон", recipientPhone),
       ]),
-      getMessageSection("📍 Доставка", [deliveryAddress]),
+      getMessageSection("📍 Адрес доставки", [deliveryAddress]),
+      getMessageSection("🗺 Карта", [mapUrl]),
       deliveryDateTime
         ? getMessageSection("🕒 Время доставки", [deliveryDateTime])
         : null,
@@ -139,6 +146,9 @@ export async function POST(request: Request) {
       recipientName,
       recipientPhone,
       address: deliveryAddress,
+      latitude,
+      longitude,
+      mapUrl,
       deliveryDate,
       deliveryTime,
       cardText,

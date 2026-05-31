@@ -3,6 +3,10 @@
 import Image from "next/image";
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
+import {
+  DeliveryMapPicker,
+  type DeliveryLocation,
+} from "@/components/DeliveryMapPicker";
 import { formatKgs } from "@/lib/currency";
 import type { Bouquet } from "@/lib/googleSheets";
 import { formatPhoneInput, normalizePhone } from "@/lib/phone";
@@ -20,6 +24,9 @@ type OrderFormData = {
   recipientName: string;
   recipientPhone: string;
   deliveryAddress: string;
+  latitude: string;
+  longitude: string;
+  mapUrl: string;
   deliveryDate: string;
   deliveryTime: string;
   cardText: string;
@@ -49,6 +56,9 @@ const initialOrderData: OrderFormData = {
   recipientName: "",
   recipientPhone: "",
   deliveryAddress: "",
+  latitude: "",
+  longitude: "",
+  mapUrl: "",
   deliveryDate: "",
   deliveryTime: "",
   cardText: "",
@@ -62,6 +72,10 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
   const [orderData, setOrderData] = useState<OrderFormData>(initialOrderData);
   const [customerPhone, setCustomerPhone] = useState(defaultPhoneCode);
   const [recipientPhone, setRecipientPhone] = useState(defaultPhoneCode);
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryLocation, setDeliveryLocation] =
+    useState<DeliveryLocation | null>(null);
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
   const [customerLookup, setCustomerLookup] = useState<CustomerLookup | null>(
     null,
   );
@@ -137,7 +151,7 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
     const normalizedRecipientPhone = normalizePhone(
       String(formData.get("recipientPhone") ?? ""),
     );
-    const deliveryAddress = String(formData.get("deliveryAddress") ?? "");
+    const nextDeliveryAddress = deliveryAddress.trim();
     const consentAccepted = formData.get("consentAccepted") === "on";
 
     if (normalizedCustomerPhone.length <= defaultPhoneCode.length) {
@@ -145,7 +159,16 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
       return;
     }
 
-    if (!deliveryAddress.trim()) {
+    if (
+      !deliveryLocation?.latitude ||
+      !deliveryLocation.longitude ||
+      !deliveryLocation.mapUrl
+    ) {
+      setSubmitError("Выберите адрес доставки на карте.");
+      return;
+    }
+
+    if (!nextDeliveryAddress) {
       setSubmitError("Укажите адрес доставки.");
       return;
     }
@@ -160,7 +183,10 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
       customerPhone: normalizedCustomerPhone,
       recipientName: String(formData.get("recipientName") ?? ""),
       recipientPhone: normalizedRecipientPhone,
-      deliveryAddress,
+      deliveryAddress: nextDeliveryAddress,
+      latitude: deliveryLocation.latitude,
+      longitude: deliveryLocation.longitude,
+      mapUrl: deliveryLocation.mapUrl,
       deliveryDate: String(formData.get("deliveryDate") ?? ""),
       deliveryTime: String(formData.get("deliveryTime") ?? ""),
       cardText: String(formData.get("cardText") ?? ""),
@@ -204,6 +230,9 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
     orderFormData.append("recipientName", orderData.recipientName);
     orderFormData.append("recipientPhone", orderData.recipientPhone);
     orderFormData.append("deliveryAddress", orderData.deliveryAddress);
+    orderFormData.append("latitude", orderData.latitude);
+    orderFormData.append("longitude", orderData.longitude);
+    orderFormData.append("mapUrl", orderData.mapUrl);
     orderFormData.append("deliveryDate", orderData.deliveryDate);
     orderFormData.append("deliveryTime", orderData.deliveryTime);
     orderFormData.append("cardText", orderData.cardText);
@@ -233,6 +262,8 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
       setOrderData(initialOrderData);
       setCustomerPhone(defaultPhoneCode);
       setRecipientPhone(defaultPhoneCode);
+      setDeliveryAddress("");
+      setDeliveryLocation(null);
       setCustomerLookup(null);
       setHasCustomerLookupResult(false);
       setDiscountApplied(false);
@@ -245,13 +276,14 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end bg-zinc-950/45 px-4 py-4 backdrop-blur-sm sm:items-center sm:justify-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="order-modal-title"
-    >
-      <div className="max-h-[90vh] w-full overflow-y-auto rounded-[1.5rem] bg-white p-5 shadow-[0_24px_80px_rgba(24,24,27,0.18)] sm:max-w-xl sm:p-6">
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-end bg-zinc-950/45 px-4 py-4 backdrop-blur-sm sm:items-center sm:justify-center"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-modal-title"
+      >
+        <div className="max-h-[90vh] w-full overflow-y-auto rounded-[1.5rem] bg-white p-5 shadow-[0_24px_80px_rgba(24,24,27,0.18)] sm:max-w-xl sm:p-6">
         <div className="mb-5">
           <h2
             id="order-modal-title"
@@ -516,9 +548,44 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
                 <input
                   className={inputClassName}
                   name="deliveryAddress"
+                  value={deliveryAddress}
+                  onChange={(event) => setDeliveryAddress(event.target.value)}
                   required
                 />
               </label>
+
+              <div className="rounded-2xl bg-[#fff8f6] p-4">
+                <button
+                  type="button"
+                  onClick={() => setIsMapPickerOpen(true)}
+                  className="w-full rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                >
+                  📍 Выбрать адрес на карте
+                </button>
+                {deliveryLocation ? (
+                  <div className="mt-3 text-sm leading-6 text-stone-600">
+                    <p>
+                      Координаты:{" "}
+                      <span className="font-medium text-stone-950">
+                        {deliveryLocation.latitude},{" "}
+                        {deliveryLocation.longitude}
+                      </span>
+                    </p>
+                    <a
+                      href={deliveryLocation.mapUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-zinc-900 underline underline-offset-4"
+                    >
+                      Открыть точку на карте
+                    </a>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-stone-500">
+                    Точная доставка будет сохранена по координатам.
+                  </p>
+                )}
+              </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="text-sm font-medium text-stone-700">
@@ -588,7 +655,20 @@ export function OrderModal({ bouquet, onClose }: OrderModalProps) {
             </div>
           </form>
         )}
+        </div>
       </div>
-    </div>
+
+      {isMapPickerOpen ? (
+        <DeliveryMapPicker
+          initialLocation={deliveryLocation}
+          onCancel={() => setIsMapPickerOpen(false)}
+          onSelect={(location) => {
+            setDeliveryLocation(location);
+            setDeliveryAddress(location.address);
+            setIsMapPickerOpen(false);
+          }}
+        />
+      ) : null}
+    </>
   );
 }

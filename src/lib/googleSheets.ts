@@ -31,6 +31,9 @@ export type OrderRecord = {
   recipientName: string;
   recipientPhone: string;
   address: string;
+  latitude: string;
+  longitude: string;
+  mapUrl: string;
   deliveryDate: string;
   deliveryTime: string;
   cardText: string;
@@ -76,6 +79,9 @@ const ordersHeader = [
   "recipient_name",
   "recipient_phone",
   "address",
+  "latitude",
+  "longitude",
+  "map_url",
   "delivery_date",
   "delivery_time",
   "card_text",
@@ -330,7 +336,7 @@ export async function appendOrder(order: OrderRecord): Promise<void> {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: process.env.GOOGLE_SHEET_ID,
-    range: `${ordersSheetName}!A:P`,
+    range: `${ordersSheetName}!A:S`,
     valueInputOption: "RAW",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
@@ -346,6 +352,9 @@ export async function appendOrder(order: OrderRecord): Promise<void> {
           order.recipientName,
           order.recipientPhone,
           order.address,
+          order.latitude,
+          order.longitude,
+          order.mapUrl,
           order.deliveryDate,
           order.deliveryTime,
           order.cardText,
